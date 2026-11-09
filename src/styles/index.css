@@ -58,3 +58,29 @@
     display: none;
   }
 }
+
+@utility custom-scrollbar {
+  /* Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: var(--av-line-strong) transparent;
+
+  /* WebKit (Chrome, Edge, Safari) */
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    margin-block: 4px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: var(--av-line-strong);
+    border-radius: 9999px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--av-ink-faint);
+  }
+}
