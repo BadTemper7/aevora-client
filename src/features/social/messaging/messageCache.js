@@ -17,7 +17,12 @@ export function mergeMessage(data, message) {
       if (!match) return [entry];
       if (merged) return [];
       merged = true;
-      return [{ ...entry, ...message, sendingState: message.sendingState || (message._id?.startsWith?.("pending:") ? entry.sendingState : undefined) }];
+      const stored = message._id && !String(message._id).startsWith("pending:");
+      return [{ ...entry, ...message, ...(stored ? {
+        // A Socket.IO/HTTP acknowledgement supersedes blob previews.
+        localAttachments: undefined, uploadStage: undefined, uploadPercent: undefined,
+        retryPayload: undefined, sendingState: undefined,
+      } : { sendingState: message.sendingState || entry.sendingState }) }];
     }),
   }));
   if (!exists) pages[0].items.push(message);
@@ -76,4 +81,12 @@ export function messagesInChronologicalOrder(data) {
     seen.add(key);
     return true;
   }).sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0) || String(a._id).localeCompare(String(b._id)));
+}
+
+/** Remove only a local optimistic message when the composer retains a failed draft. */
+export function removePendingMessage(data, clientId) {
+  if (!data?.pages) return data;
+  return { ...data, pages: data.pages.map((page) => ({ ...page,
+    items: (page.items || []).filter((m) => !(m.clientId === clientId && String(m._id).startsWith("pending:"))),
+  })) };
 }

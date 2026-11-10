@@ -52,6 +52,6 @@ test("messages use concurrent idempotent sends; sockets do not stall on presence
   assert.match(page, /clientId: uuidv4\(\)/);
   assert.match(sockets, /void \(async \(\) =>/);
   assert.match(sockets, /socket\.on\("message:delivered"/);
-  assert.match(server, /void emitNewMessage\(c, msg\)/);
+  assert.match(server, /void emitNewMessage\(c, storedMessage\)/);
   assert.match(server, /Block\.find\(\{ \$or:/);
 });

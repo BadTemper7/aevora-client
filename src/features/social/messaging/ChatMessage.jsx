@@ -24,6 +24,11 @@ function ChatMessage({ message, previous, next, conversation, userId, onReply, o
   const status = messageDeliveryState(message, recipients);
   const previouslySame = previous?.senderId === message.senderId && new Date(message.createdAt) - new Date(previous.createdAt) < 5 * 60_000;
   const lastMine = isMine && next?.senderId !== userId;
+  // Optimistic local blob previews are used until the durable media IDs arrive.
+  // Once stored, each asset uses its own kind, not the aggregate message kind.
+  const attachments = message.localAttachments?.length
+    ? message.localAttachments
+    : (message.attachments?.length ? message.attachments : (message.mediaIds || []).map((id) => ({ id, kind: message.kind })));
   const [openToken, setOpenToken] = useState(0);
   const [showGroupReceipts, setShowGroupReceipts] = useState(false);
   const stopPress = () => { clearTimeout(pressTimer.current); };
@@ -39,7 +44,7 @@ function ChatMessage({ message, previous, next, conversation, userId, onReply, o
   >
     {conversation.type === "group" && !isMine && <span className="w-8 shrink-0 self-end">{!previouslySame && <Avatar name={sender?.name} src={sender?.image} size="sm"/>}</span>}
     <div className="relative max-w-[92%] pt-5 sm:max-w-[82%]">
-      <MessageActions
+      {!String(message._id).startsWith("pending:") && <MessageActions
         message={message} currentUserId={userId} isMine={isMine} quickEmoji={conversation.quickEmoji}
         canPin={conversation.type !== "group" || ["owner", "admin"].includes(conversation.members?.find((m) => m.user?.id === userId)?.role)}
         canDeleteEveryone={isMine || (conversation.type === "group" && ["owner", "admin"].includes(conversation.members?.find((m) => m.user?.id === userId)?.role))}
@@ -48,18 +53,31 @@ function ChatMessage({ message, previous, next, conversation, userId, onReply, o
         onCopy={() => navigator.clipboard.writeText(message.text || "")}
         onPin={() => onPin(message)} onDelete={() => onDelete(message)} onDeleteMe={() => onDeleteMe(message)}
         onReport={() => onReport(message._id)}
-      />
+      />}
       {conversation.type === "group" && !isMine && !previouslySame && <p className="mb-1 pl-2 text-xs font-semibold text-ink-soft">{nickname || sender?.name || sender?.username || "Participant"}</p>}
       <div className={`rounded-2xl px-3 py-2.5 text-sm shadow-sm ${isMine ? BUBBLE_THEMES[conversation.theme] || BUBBLE_THEMES.default : "border border-line bg-raised text-ink"}`}>
         {message.replyTo && <button type="button" className="mb-2 block w-full rounded-lg border-l-2 border-current bg-black/10 px-2 py-1 text-left text-xs opacity-85 hover:opacity-100" onClick={() => onJump(message.replyTo)}>Reply to earlier message</button>}
         {message.deletedAt ? <p className="italic opacity-75">This message was deleted</p> : <>
           {message.text && <p className="whitespace-pre-wrap break-words">{message.text}</p>}
           {message.gif?.source === "giphy" && message.gif?.id && <GiphyMessage id={message.gif.id}/>}{message.gif?.url && <img className="mt-1 max-h-72 w-auto max-w-full rounded-lg object-contain" loading="lazy" src={message.gif.url} alt="GIF reaction"/>}
-          {message.mediaIds?.map((id) => message.kind === "video"
-            ? <video key={id} controls preload="metadata" poster={mediaFile(id, true)} src={mediaFile(id)} className="mt-2 max-h-72 max-w-full rounded-lg"/>
-            : message.kind === "file"
-              ? <a key={id} href={mediaFile(id)} className="mt-2 flex items-center gap-2 rounded-lg border border-current/30 px-3 py-2 underline underline-offset-2"><FileDown size={19}/> Download attachment</a>
-              : <img key={id} loading="lazy" alt="Message attachment" src={mediaFile(id)} className="mt-2 max-h-64 max-w-full rounded-lg object-contain"/>) }
+          {attachments.map((asset, index) => {
+            const src = asset.url || (asset.id ? mediaFile(asset.id) : undefined);
+            const key = asset.key || asset.id || index;
+            if (!src) return null;
+            if (asset.kind === "video") return <video key={key} controls preload="metadata"
+              poster={asset.id ? mediaFile(asset.id, true) : undefined}
+              src={src} className="mt-2 max-h-72 max-w-full rounded-lg" aria-label={asset.name || "Video attachment"}/>;
+            if (asset.kind === "file") return <a key={key} href={src} download={asset.name || undefined}
+              className="mt-2 flex min-w-0 items-center gap-2 rounded-lg border border-current/30 px-3 py-2 hover:opacity-90">
+              <FileDown size={20} className="shrink-0"/><span className="min-w-0 flex-1"><span className="block truncate font-semibold">{asset.name || "Download attachment"}</span>
+              {Number.isFinite(asset.size) && <span className="block text-xs opacity-70">{asset.size >= 1048576 ? `${(asset.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.ceil(asset.size / 1024))} KB`}</span>}</span></a>;
+            return <img key={key} loading="lazy" alt={asset.name || "Message attachment"} src={src}
+              className="mt-2 max-h-64 max-w-full rounded-lg object-contain"/>;
+          })}
+          {message.sendingState === "sending" && message.localAttachments?.length > 0 && <div role="status" className="mt-2 text-xs opacity-80">
+            <span>{message.uploadStage === "uploading" ? "Uploading attachment" : message.uploadStage === "processing" ? "Optimizing attachment" : "Preparing attachment"}</span>
+            {Number.isFinite(message.uploadPercent) && message.uploadStage === "uploading" && <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/15"><div className="h-full bg-current" style={{ width: `${Math.min(100, Math.max(0, message.uploadPercent))}%` }}/></div>}
+          </div>}
         </>}
         <div className="mt-1 flex items-center justify-end gap-2 text-[10px] opacity-75">
           {message.pinnedAt && <span title="Pinned message"><Pin size={11}/></span>}
