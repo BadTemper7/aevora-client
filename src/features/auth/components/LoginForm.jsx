@@ -7,22 +7,20 @@ import Button from "../../../components/ui/Button";
 import Input from "../../../components/ui/Input";
 import PasswordInput from "../../../components/ui/PasswordInput";
 import { useForm } from "../../../hooks/useForm";
-import { useAuthStore } from "../../../stores/authStore";
+import { login, loginWithGoogle } from "../api/authApi";
 import { validateLogin } from "../validation";
 import SocialAuthButtons from "./SocialAuthButtons";
 
 export default function LoginForm() {
-  const signIn = useAuthStore((state) => state.signIn);
-
   const form = useForm({
     initialValues: { email: "", password: "" },
     validate: validateLogin,
   });
 
-  // On success the store updates and <GuestRoute /> sends the person onward.
+  // On success the session updates and <GuestRoute /> sends the person onward.
   const submit = form.handleSubmit(async (values) => {
     try {
-      await signIn(values);
+      await login(values);
     } catch {
       throw new Error("We couldn't log you in. Check your email and password, then try again.");
     }
@@ -68,9 +66,12 @@ export default function LoginForm() {
       </div>
 
       <SocialAuthButtons
-        onSelect={(provider) =>
-          form.setFormError(`${provider} sign-in isn't available yet. Log in with your email instead.`)
-        }
+        disabled={form.submitting}
+        onSelect={(options) => {
+          form.setFormError("");
+          return loginWithGoogle(options);
+        }}
+        onError={(error) => form.setFormError(error.message || "Could not connect with Google. Please try again.")}
       />
     </form>
   );

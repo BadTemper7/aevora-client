@@ -1,5 +1,7 @@
 import { Bookmark, EyeOff, Heart, Link2, MessageCircle, MoreHorizontal, Share2, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { read, errorText, mediaFile } from "../../api/socialApi";
 
 import Avatar from "../../../../components/ui/Avatar";
 import Dropdown, { DropdownItem } from "../../../../components/ui/Dropdown";
@@ -42,10 +44,31 @@ export default function PostCard({
 }) {
   const [showComments, setShowComments] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const client = useQueryClient();
+  const comments = useInfiniteQuery({
+    queryKey: ["post", "comments", post.id],
+    queryFn: ({ pageParam }) => read(`/feed/posts/${post.id}/comments`, { limit: 30, ...(pageParam ? { before: pageParam } : {}) }),
+    initialPageParam: null,
+    getNextPageParam: (last) => last?.nextCursor || undefined,
+    enabled: showComments,
+  });
+  const safeAction = async (operation) => {
+    if (working) return;
+    setWorking(true); setActionError("");
+    try { await operation(); }
+    catch (error) { setActionError(errorText(error)); }
+    finally { setWorking(false); }
+  };
+  const submitComment = async (text) => {
+    await onAddComment(post.id, text);
+    await client.invalidateQueries({ queryKey: ["post", "comments", post.id] });
+  };
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
+      await navigator.clipboard.writeText(`${window.location.origin}/posts/${post.id}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -54,6 +77,7 @@ export default function PostCard({
   };
 
   const isOwn = post.own || post.author.username === currentUser?.username;
+  const images = post.images || (post.mediaIds || []).map((id) => ({ id, url: mediaFile(id) }));
 
   return (
     <article className="rounded-2xl border border-line bg-surface p-4 sm:p-5">
@@ -88,11 +112,11 @@ export default function PostCard({
             Copy link
           </DropdownItem>
           {isOwn ? (
-            <DropdownItem icon={Trash2} danger onClick={() => onRemove(post.id)}>
+            <DropdownItem icon={Trash2} danger onClick={() => safeAction(() => onRemove())}>
               Delete post
             </DropdownItem>
           ) : (
-            <DropdownItem icon={EyeOff} onClick={() => onRemove(post.id)}>
+            <DropdownItem icon={EyeOff} onClick={() => safeAction(() => onRemove())}>
               Hide this post
             </DropdownItem>
           )}
@@ -105,7 +129,7 @@ export default function PostCard({
         </p>
       )}
 
-      <PostImages images={post.images} />
+      <PostImages images={images} />
 
       <div className="mt-4 flex items-center justify-between text-[13px] text-ink-soft">
         <span>{formatCompactNumber(post.likes)} likes</span>
@@ -121,7 +145,8 @@ export default function PostCard({
       <div className="mt-3 flex items-center gap-1 border-t border-line pt-2">
         <button
           type="button"
-          onClick={() => onToggleLike(post.id)}
+          onClick={() => safeAction(() => onToggleLike())}
+          disabled={working}
           aria-pressed={post.liked}
           className={cn(actionClass, post.liked ? "text-[#e0457b]" : "text-ink-soft hover:text-ink")}
         >
@@ -151,7 +176,8 @@ export default function PostCard({
 
         <button
           type="button"
-          onClick={() => onToggleSave(post.id)}
+          onClick={() => safeAction(() => onToggleSave())}
+          disabled={working}
           aria-pressed={post.saved}
           aria-label={post.saved ? "Remove from saved" : "Save post"}
           className={cn(
@@ -163,13 +189,12 @@ export default function PostCard({
         </button>
       </div>
 
-      {showComments && (
-        <CommentSection
-          comments={post.comments}
-          currentUser={currentUser}
-          onAdd={(text) => onAddComment(post.id, text)}
-        />
-      )}
+      {actionError && <p role="alert" className="mt-2 text-xs text-danger">{actionError}</p>}
+      {showComments && <div>
+        {comments.isPending ? <p role="status" className="mt-3 text-xs text-ink-soft">Loading comments...</p> : comments.error ? <p role="alert" className="mt-3 text-xs text-danger">{errorText(comments.error)}</p> : null}
+        <CommentSection comments={comments.data?.pages?.flatMap((page) => page.items || []) || []} currentUser={currentUser} onAdd={submitComment}/>
+        {comments.hasNextPage && <button type="button" disabled={comments.isFetchingNextPage} className="mt-3 text-xs font-semibold text-brand-ink" onClick={() => comments.fetchNextPage()}>{comments.isFetchingNextPage ? "Loading..." : "View older comments"}</button>}
+      </div>}
     </article>
   );
 }

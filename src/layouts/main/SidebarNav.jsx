@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 import { NAV_GROUPS } from "../../app/config/navigation";
 import { ROUTES } from "../../app/config/routes";
 import { cn } from "../../utils/cn";
+import { useCommunityUnread, useMessageUnread } from "../../features/social/hooks/useUnreadIndicators";
 
 const linkClass = ({ isActive }) =>
   cn(
@@ -14,6 +15,9 @@ const linkClass = ({ isActive }) =>
   );
 
 export default function SidebarNav() {
+  const messageUnread = useMessageUnread().data?.unread || 0;
+  const communityUnread = useCommunityUnread().data?.total || 0;
+  const badgeFor = path => path === ROUTES.messages ? messageUnread : path === ROUTES.communities ? communityUnread : 0;
   return (
     <nav
       aria-label="Primary"
@@ -27,7 +31,8 @@ export default function SidebarNav() {
               <li key={path}>
                 <NavLink to={path} end={path === ROUTES.home} className={linkClass}>
                   <Icon className="size-5 shrink-0" aria-hidden="true" />
-                  {label}
+                  <span className="flex-1">{label}</span>
+                  {badgeFor(path) > 0 && <span className="ml-auto rounded-full bg-brand px-1.5 py-0.5 text-[10px] font-bold text-on-brand" aria-label={`${badgeFor(path)} unread ${path === ROUTES.messages ? 'messages' : 'community messages'}`}>{badgeFor(path) > 99 ? '99+' : badgeFor(path)}</span>}
                 </NavLink>
               </li>
             ))}

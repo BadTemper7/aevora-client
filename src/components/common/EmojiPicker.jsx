@@ -1,93 +1,49 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { LoaderCircle } from "lucide-react";
 
 import { cn } from "../../utils/cn";
 
-const DEFAULT_EMOJIS = [
-  "😀",
-  "😄",
-  "😁",
-  "😂",
-  "🤣",
-  "😊",
-  "😍",
-  "😘",
-  "😎",
-  "🤩",
-  "🥳",
-  "🤔",
-  "😅",
-  "😢",
-  "😭",
-  "😡",
-  "🙃",
-  "😴",
-  "🤯",
-  "🥰",
-  "😇",
-  "🤗",
-  "🫡",
-  "🤝",
-  "👍",
-  "👎",
-  "👏",
-  "🙌",
-  "🙏",
-  "💪",
-  "✌️",
-  "🤞",
-  "👀",
-  "🔥",
-  "💯",
-  "✨",
-  "🎉",
-  "❤️",
-  "🧡",
-  "💛",
-  "💚",
-  "💙",
-  "💜",
-  "🖤",
-  "💔",
-  "⭐",
-  "🌈",
-  "☀️",
-  "☕",
-  "🍕",
-  "🎮",
-  "🎧",
-  "📷",
-  "💻",
-  "📱",
-  "🚀",
-  "⚽",
-  "🏆",
-  "📌",
-  "✅",
-];
+// Loaded only when a picker is first opened. Includes the complete emoji library:
+// search, categories, skin tones, and recently used emojis.
+const FullEmojiLibrary = lazy(() => import("emoji-picker-react"));
+
+class EmojiLibraryErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (this.state.failed) {
+      return <p role="alert" className="p-4 text-sm text-danger">Could not load emojis. Check your connection and retry.</p>;
+    }
+    return this.props.children;
+  }
+}
 
 export default function EmojiPicker({
   open,
   onSelect,
   onClose,
   anchorRef,
-  emojis = DEFAULT_EMOJIS,
-  columns = 7,
   className,
+  label = "Choose an emoji",
 }) {
   const pickerRef = useRef(null);
   const onCloseRef = useRef(onClose);
   const [coords, setCoords] = useState({ top: -9999, left: -9999 });
 
-  // Keep onClose in a ref to avoid re-triggering the scroll listener on every parent render
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  // Close on outside click or Escape
   useEffect(() => {
-    if (!open) return;
-
+    if (!open) return undefined;
     const onPointerDown = (event) => {
       if (pickerRef.current?.contains(event.target)) return;
       if (anchorRef?.current?.contains(event.target)) return;
@@ -96,68 +52,42 @@ export default function EmojiPicker({
     const onKeyDown = (event) => {
       if (event.key === "Escape") onCloseRef.current?.();
     };
-
-    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open, anchorRef]);
 
-  // Smart positioning & viewport visibility check
   useLayoutEffect(() => {
     if (!open) {
       setCoords({ top: -9999, left: -9999 });
-      return;
+      return undefined;
     }
-
     const updatePosition = () => {
-      if (!pickerRef.current || !anchorRef?.current) return;
-
-      const anchorRect = anchorRef.current.getBoundingClientRect();
-
-      // Auto-close if the anchor button scrolls out of the viewport
-      if (
-        anchorRect.bottom < 0 ||
-        anchorRect.top > window.innerHeight ||
-        anchorRect.right < 0 ||
-        anchorRect.left > window.innerWidth ||
-        anchorRect.width === 0 ||
-        anchorRect.height === 0
-      ) {
+      if (!anchorRef?.current || !pickerRef.current) return;
+      const rect = anchorRef.current.getBoundingClientRect();
+      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth || rect.width === 0) {
         onCloseRef.current?.();
         return;
       }
-
-      const pickerRect = pickerRef.current.getBoundingClientRect();
-
-      // 1. Vertical positioning (Top/Bottom flip)
-      let top = anchorRect.top - pickerRect.height - 8;
-      const spaceAbove = anchorRect.top;
-      const spaceBelow = window.innerHeight - anchorRect.bottom;
-
-      if (spaceAbove < pickerRect.height + 8 && spaceBelow > spaceAbove) {
-        top = anchorRect.bottom + 8;
-      }
-      top = Math.max(16, top);
-
-      // 2. Horizontal positioning (Left/Right clamp)
-      let left = anchorRect.left;
-      if (left + pickerRect.width > window.innerWidth - 16) {
-        left = window.innerWidth - pickerRect.width - 16;
-      }
-      left = Math.max(16, left);
-
+      const box = pickerRef.current.getBoundingClientRect();
+      const margin = 8;
+      const above = rect.top;
+      const below = window.innerHeight - rect.bottom;
+      let top = above >= box.height + margin || above > below
+        ? rect.top - box.height - margin
+        : rect.bottom + margin;
+      top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - box.height - margin));
+      let left = rect.left;
+      if (left + box.width > window.innerWidth - margin) left = rect.right - box.width;
+      left = Math.min(Math.max(margin, left), Math.max(margin, window.innerWidth - box.width - margin));
       setCoords({ top, left });
     };
-
     updatePosition();
-
     window.addEventListener("resize", updatePosition);
-    // Use capture=true to catch scrolling within nested containers
     window.addEventListener("scroll", updatePosition, true);
-
     return () => {
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
@@ -166,42 +96,30 @@ export default function EmojiPicker({
 
   if (!open) return null;
 
+  const pickerHeight = typeof window === "undefined" ? 350 : Math.min(350, window.innerHeight - 42);
+  const scheme = typeof document !== "undefined" && document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+
   return createPortal(
     <div
       ref={pickerRef}
+      data-emoji-picker-root
       role="dialog"
-      aria-label="Insert an emoji"
-      style={{
-        top: `${coords.top}px`,
-        left: `${coords.left}px`,
-        // Hide until positioned to avoid flashing in the wrong spot
-        opacity: coords.top === -9999 ? 0 : 1,
-        transition: "opacity 0.1s ease-in-out",
-      }}
-      className={cn(
-        "fixed z-[100] w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-line bg-surface p-2 shadow-lg",
-        className,
-      )}
+      aria-label={label}
+      style={{ top: coords.top, left: coords.left, opacity: coords.top === -9999 ? 0 : 1 }}
+      className={cn("fixed z-[200] w-[340px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-line bg-surface shadow-2xl", className)}
     >
-      <div
-        className="custom-scrollbar grid max-h-56 gap-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
-        style={{
-          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-        }}
-      >
-        {emojis.map((emoji) => (
-          <button
-            key={emoji}
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onSelect?.(emoji)}
-            className="grid aspect-square w-full place-items-center rounded-lg text-lg transition-colors hover:bg-line/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-soft"
-          >
-            <span aria-hidden="true">{emoji}</span>
-            <span className="sr-only">Insert {emoji}</span>
-          </button>
-        ))}
-      </div>
+      <EmojiLibraryErrorBoundary>
+        <Suspense fallback={<div className="flex h-48 items-center justify-center gap-2 text-ink-soft"><LoaderCircle size={20} className="animate-spin"/> Loading emojis...</div>}>
+          <FullEmojiLibrary
+            width="100%"
+            height={pickerHeight}
+            colorScheme={scheme}
+            emojiStyle="native"
+            onEmojiClick={(data) => onSelect?.(data.emoji)}
+            previewConfig={{ showPreview: false }}
+          />
+        </Suspense>
+      </EmojiLibraryErrorBoundary>
     </div>,
     document.body,
   );

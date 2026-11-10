@@ -10,6 +10,7 @@ import EmojiPicker from "../../../../components/common/EmojiPicker";
 import Avatar from "../../../../components/ui/Avatar";
 import Button from "../../../../components/ui/Button";
 import { cn } from "../../../../utils/cn";
+import { uploadMedia, waitForMedia } from "../../api/socialApi";
 
 const DRAFT_STORAGE_KEY = "composer:draft";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB per photo
@@ -27,6 +28,7 @@ export default function PostComposer({ user, onSubmit }) {
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
+  const [progress, setProgress] = useState("");
 
   const textareaRef = useRef(null);
   const fileRef = useRef(null);
@@ -95,7 +97,7 @@ export default function PostComposer({ user, onSubmit }) {
     let rejected = 0;
 
     for (const file of files) {
-      const isImage = file.type.startsWith("image/");
+      const isImage = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"].includes(file.type);
       if (!isImage || file.size > MAX_IMAGE_BYTES || accepted.length >= room) {
         rejected += 1;
         continue;
@@ -109,6 +111,7 @@ export default function PostComposer({ user, onSubmit }) {
         ...accepted.map((file) => ({
           id: crypto.randomUUID(),
           url: URL.createObjectURL(file),
+          file,
         })),
       ]);
     }
@@ -178,10 +181,20 @@ export default function PostComposer({ user, onSubmit }) {
 
     setIsSubmitting(true);
     try {
-      await onSubmit({ content: content.trim(), images });
-
+      const mediaIds = [];
+      for (let index = 0; index < images.length; index += 1) {
+        const item = images[index];
+        setProgress(`Uploading photo ${index + 1} of ${images.length}...`);
+        const uploaded = await uploadMedia(item.file, "post", (value) => setProgress(`Uploading photo ${index + 1} of ${images.length}: ${value}%`));
+        setProgress(`Optimizing photo ${index + 1} of ${images.length}...`);
+        await waitForMedia(uploaded.id);
+        mediaIds.push(uploaded.id);
+      }
+      setProgress("Publishing post...");
+      await onSubmit({ content: content.trim(), mediaIds, visibility: "public" });
+      images.forEach((image) => URL.revokeObjectURL(image.url));
       setContent("");
-      setImages([]); // URLs now belong to the published post
+      setImages([]);
       setEmojiOpen(false);
       setNotice("");
       try {
@@ -189,9 +202,10 @@ export default function PostComposer({ user, onSubmit }) {
       } catch {
         /* ignore */
       }
-    } catch {
-      setNotice("Something went wrong — your post is still here, try again.");
+    } catch (error) {
+      setNotice(error?.response?.data?.error?.message || error?.message || "Your post could not be published. Try again.");
     } finally {
+      setProgress("");
       setIsSubmitting(false);
     }
   };
@@ -274,6 +288,7 @@ export default function PostComposer({ user, onSubmit }) {
       </div>
 
       {/* Screen-reader + sighted feedback for rejected files / errors */}
+      {progress && <p role="status" className="mt-2 text-xs font-medium text-brand-ink">{progress}</p>}
       <p
         aria-live="polite"
         className="mt-2 text-xs font-medium text-danger empty:hidden"

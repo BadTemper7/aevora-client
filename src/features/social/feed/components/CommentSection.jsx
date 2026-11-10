@@ -6,13 +6,16 @@ import { formatRelativeTime } from "../../../../utils/formatDate";
 
 export default function CommentSection({ comments, currentUser, onAdd }) {
   const [text, setText] = useState("");
-
-  const handleSubmit = (event) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const handleSubmit = async (event) => {
     event.preventDefault();
     const trimmed = text.trim();
-    if (!trimmed) return;
-    onAdd(trimmed);
-    setText("");
+    if (!trimmed || busy) return;
+    setBusy(true); setError("");
+    try { await onAdd(trimmed); setText(""); }
+    catch (cause) { setError(cause?.response?.data?.error?.message || cause?.message || "Could not post comment."); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -51,13 +54,14 @@ export default function CommentSection({ comments, currentUser, onAdd }) {
         />
         <button
           type="submit"
-          disabled={!text.trim()}
+          disabled={!text.trim() || busy}
           aria-label="Send comment"
           className="grid size-10 place-items-center rounded-xl text-brand-ink transition-colors hover:bg-brand-soft disabled:text-ink-faint disabled:hover:bg-transparent"
         >
           <SendHorizontal className="size-5" aria-hidden="true" />
         </button>
       </form>
+      {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
     </div>
   );
 }

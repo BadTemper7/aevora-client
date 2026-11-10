@@ -1,4 +1,4 @@
-import { AtSign, Mail, UserRound } from "lucide-react";
+import { Mail, UserRound } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { ROUTES } from "../../../app/config/routes";
@@ -8,27 +8,40 @@ import Checkbox from "../../../components/ui/Checkbox";
 import Input from "../../../components/ui/Input";
 import PasswordInput from "../../../components/ui/PasswordInput";
 import { useForm } from "../../../hooks/useForm";
-import { useAuthStore } from "../../../stores/authStore";
+import { useUsernameAvailability } from "../hooks/useUsernameAvailability";
+import { loginWithGoogle, register } from "../api/authApi";
 import { validateRegister } from "../validation";
 import PasswordStrength from "./PasswordStrength";
 import SocialAuthButtons from "./SocialAuthButtons";
+import UsernameInput from "./UsernameInput";
 
 const linkClass = "font-semibold text-brand-ink hover:underline";
 
 export default function RegisterForm() {
-  const signUp = useAuthStore((state) => state.signUp);
-
   const form = useForm({
     initialValues: { name: "", username: "", email: "", password: "", terms: false },
     validate: validateRegister,
   });
 
-  // On success the store updates and <GuestRoute /> sends the person to the app.
+  const usernameAvailability = useUsernameAvailability(form.values.username);
+  const usernameReady = usernameAvailability.status === "available";
+
+  // Check availability before account creation. The backend also rechecks
+  // uniqueness on submit in case another person claims the same name.
   const submit = form.handleSubmit(async (values) => {
+    if (!usernameReady || usernameAvailability.normalized !== values.username.toLowerCase()) {
+      throw new Error("Choose an available username before creating your account.");
+    }
+
     try {
-      await signUp(values);
-    } catch {
-      throw new Error("We couldn't create your account. Check your details and try again.");
+      await register({ ...values, username: usernameAvailability.normalized });
+    } catch (error) {
+      if (error.code === "USERNAME_IS_ALREADY_TAKEN" ||
+          /username.*(already.*(taken|exists)|unavailable)/i.test(error.message || "")) {
+        usernameAvailability.markTaken();
+        return; // Show the error beside the username instead of after a retry.
+      }
+      throw new Error(error.message || "We couldn't create your account. Check your details and try again.");
     }
   });
 
@@ -44,13 +57,8 @@ export default function RegisterForm() {
           leftIcon={UserRound}
           {...form.field("name")}
         />
-        <Input
-          label="Username"
-          autoComplete="username"
-          autoCapitalize="none"
-          spellCheck={false}
-          placeholder="reysantos"
-          leftIcon={AtSign}
+        <UsernameInput
+          availability={usernameAvailability}
           {...form.field("username")}
         />
       </div>
@@ -92,7 +100,7 @@ export default function RegisterForm() {
         {...form.checkbox("terms")}
       />
 
-      <Button type="submit" size="lg" fullWidth loading={form.submitting}>
+      <Button type="submit" size="lg" fullWidth loading={form.submitting} disabled={!usernameReady || form.submitting}>
         {form.submitting ? "Creating account" : "Create account"}
       </Button>
 
@@ -103,9 +111,12 @@ export default function RegisterForm() {
       </div>
 
       <SocialAuthButtons
-        onSelect={(provider) =>
-          form.setFormError(`${provider} sign-up isn't available yet. Create an account with your email instead.`)
-        }
+        disabled={form.submitting}
+        onSelect={(options) => {
+          form.setFormError("");
+          return loginWithGoogle(options);
+        }}
+        onError={(error) => form.setFormError(error.message || "Could not connect with Google. Please try again.")}
       />
     </form>
   );

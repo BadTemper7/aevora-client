@@ -6,6 +6,7 @@ export default function Input({
   label,
   error,
   hint,
+  hintTone = "neutral",
   leftIcon: LeftIcon,
   trailing,
   labelAction,
@@ -58,7 +59,11 @@ export default function Input({
       {message && (
         <p
           id={messageId}
-          className={cn("mt-1.5 text-[13px] leading-5", error ? "text-danger" : "text-ink-soft")}
+          aria-live="polite"
+          className={cn(
+            "mt-1.5 text-[13px] leading-5",
+            error ? "text-danger" : hintTone === "success" ? "text-green-600" : "text-ink-soft",
+          )}
         >
           {message}
         </p>

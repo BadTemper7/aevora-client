@@ -43,7 +43,7 @@ export default function SearchBar() {
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         aria-label="Search Aevora"
-        placeholder="Search people, posts, videos and communities"
+        placeholder="Search people by username"
         className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-faint"
       />
       <kbd className="hidden rounded-md border border-line px-1.5 py-0.5 text-xs text-ink-faint lg:block">

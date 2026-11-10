@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 
 import { cn } from "../utils/cn";
+import { useRealtime } from "../features/social/hooks/useRealtime";
 import MobileNav from "./main/MobileNav";
 import RightRail from "./main/RightRail";
 import { SHELL } from "./main/shell";
@@ -15,6 +16,7 @@ import Topbar from "./main/Topbar";
  *   xl      sidebar | content | right rail
  */
 export default function MainLayout() {
+  useRealtime();
   return (
     <div className="min-h-dvh bg-canvas text-ink">
       <a

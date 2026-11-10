@@ -1,291 +1,377 @@
-import { ChevronLeft, ChevronRight, Loader2, Plus, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Globe,
+  Pause,
+  Trash2,
+  Users,
+  Volume2,
+  VolumeX,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-
 import Avatar from "../../../../components/ui/Avatar";
-import Button from "../../../../components/ui/Button";
 import { cn } from "../../../../utils/cn";
-import { stories as initialStories } from "../data/mock";
+import { mediaFile } from "../../api/socialApi";
 
-/** Gradient ring = unseen story, quiet ring = seen. */
-function StoryRing({ seen, children }) {
-  return (
-    <span
-      className={cn(
-        "grid size-[68px] place-items-center rounded-full p-[3px]",
-        seen
-          ? "bg-line-strong"
-          : "bg-gradient-to-tr from-[#3f68f5] via-[#7c4df0] to-[#c04bd8]",
-      )}
-    >
-      <span className="grid size-full place-items-center rounded-full bg-surface p-[2px]">
-        {children}
-      </span>
-    </span>
-  );
+const IMAGE_DURATION = 5000; // ms an image stays on screen
+const HOLD_MS = 200; // press longer than this = hold-to-pause, not a tap
+
+const VISIBILITY = {
+  public: { label: "Everyone", Icon: Globe },
+  friends: { label: "Friends", Icon: Users },
+  followers: { label: "Followers", Icon: Users },
+};
+
+function timeAgo(date) {
+  if (!date) return "";
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(date)) / 60000));
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return hrs < 24 ? `${hrs}h` : `${Math.floor(hrs / 24)}d`;
 }
 
-export default function StoryRail({ user }) {
-  const [stories, setStories] = useState(initialStories);
-  const scrollRef = useRef(null);
-  const fileInputRef = useRef(null);
+function timeLeft(date) {
+  if (!date) return "";
+  const mins = Math.max(0, Math.floor((new Date(date) - Date.now()) / 60000));
+  if (mins < 60) return `${mins}m left`;
+  return `${Math.floor(mins / 60)}h left`;
+}
 
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
+export default function StoryViewer({
+  stories,
+  index,
+  user,
+  busy,
+  error,
+  onChange, // (nextIndex) => void
+  onClose, // () => void
+  onDelete, // (story) => void
+  onView, // (story) => void  - mark as viewed
+}) {
+  const story = stories[index];
+  const isVideo = story?.mediaKind === "video";
+  const isOwner = story?.ownerId === user?.id;
 
-  // Instagram-style preview state
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const videoRef = useRef(null);
+  const elapsed = useRef(0);
+  const pressStart = useRef(0);
+  const closeRef = useRef(null);
 
-  const checkScroll = () => {
-    if (!scrollRef.current) return;
-    const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+  const next = useCallback(() => {
+    if (index < stories.length - 1) onChange(index + 1);
+    else onClose();
+  }, [index, stories.length, onChange, onClose]);
 
-    setCanScrollLeft(scrollLeft > 1);
-    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 1);
-  };
+  const prev = useCallback(() => {
+    if (index > 0) {
+      onChange(index - 1);
+      return;
+    }
+    // first story: restart it
+    elapsed.current = 0;
+    setProgress(0);
+    if (videoRef.current) videoRef.current.currentTime = 0;
+  }, [index, onChange]);
 
+  // Always call the latest next() from timers without re-subscribing them.
+  const nextRef = useRef(next);
+  nextRef.current = next;
+
+  // Reset + mark viewed whenever the story changes.
   useEffect(() => {
-    checkScroll();
-    window.addEventListener("resize", checkScroll);
-    return () => window.removeEventListener("resize", checkScroll);
-  }, [stories]);
+    if (!story) return;
+    elapsed.current = 0;
+    setProgress(0);
+    setPaused(false);
+    onView?.(story);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [story?.id]);
 
-  const scroll = (direction) => {
-    if (!scrollRef.current) return;
-    const { clientWidth } = scrollRef.current;
+  // Auto-advance timer for photos.
+  useEffect(() => {
+    if (!story || isVideo || paused) return undefined;
+    let raf;
+    let last = performance.now();
+    const tick = (now) => {
+      elapsed.current += now - last;
+      last = now;
+      const p = Math.min(elapsed.current / IMAGE_DURATION, 1);
+      setProgress(p);
+      if (p >= 1) {
+        nextRef.current();
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [story?.id, isVideo, paused]);
 
-    scrollRef.current.scrollBy({
-      left: direction === "left" ? -clientWidth : clientWidth,
-      behavior: "smooth",
-    });
+  // Pause / resume video together with the hold gesture.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (paused) v.pause();
+    else v.play().catch(() => {});
+  }, [paused, story?.id]);
+
+  // Keyboard, focus and scroll lock.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight") next();
+      else if (e.key === "ArrowLeft") prev();
+      else if (e.key === " ") {
+        e.preventDefault();
+        setPaused((p) => !p);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [next, prev, onClose]);
+
+  if (!story) return null;
+
+  const author = story.author?.name || "User";
+  const vis = VISIBILITY[story.visibility];
+  const poster = mediaFile(story.mediaId, true);
+  const backdrop = isVideo ? poster : mediaFile(story.mediaId);
+
+  const onPointerDown = () => {
+    pressStart.current = Date.now();
+    setPaused(true);
+  };
+  const onPointerUp = (e) => {
+    setPaused(false);
+    if (Date.now() - pressStart.current > HOLD_MS) return; // it was a hold
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if (x < rect.width * 0.3) prev();
+    else next();
   };
 
-  const markSeen = (id) =>
-    setStories((current) =>
-      current.map((s) => (s.id === id ? { ...s, seen: true } : s)),
-    );
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${author}'s story`}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black text-white"
+    >
+      {/* Blurred ambient backdrop */}
+      <img
+        src={backdrop}
+        alt=""
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 size-full scale-125 object-cover opacity-40 blur-3xl"
+      />
+      <div className="absolute inset-0 bg-black/50" />
 
-  // 1. User selects a file -> open preview modal
-  const handleFileSelect = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Reset input so the same file can be selected again
-    event.target.value = "";
-
-    const url = URL.createObjectURL(file);
-    setPreviewUrl(url);
-  };
-
-  // 2. User clicks "Share to story" -> simulate upload & add story
-  const handleShareStory = () => {
-    if (!previewUrl) return;
-
-    setIsUploading(true);
-
-    // Simulate a network upload delay
-    setTimeout(() => {
-      const newStory = {
-        id: crypto.randomUUID(),
-        name: user?.name || "You",
-        seen: true, // Your own story is technically "seen"
-        image: previewUrl, // Transfer the blob URL to the story
-      };
-
-      setStories((current) => [newStory, ...current]);
-
-      // Cleanup state
-      setIsUploading(false);
-      setPreviewUrl(null);
-    }, 800); // 800ms fake delay
-  };
-
-  // 3. User cancels preview
-  const handleCancelPreview = () => {
-    if (isUploading) return;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
-  };
-
-  return (
-    <>
-      <section
-        aria-label="Stories"
-        className="rounded-2xl border border-line bg-surface px-4 pb-3 pt-4"
+      {/* Desktop close */}
+      <button
+        ref={closeRef}
+        type="button"
+        aria-label="Close story"
+        onClick={onClose}
+        className="absolute right-5 top-5 z-30 hidden size-11 place-items-center rounded-full bg-white/10 backdrop-blur transition hover:bg-white/20 sm:grid"
       >
-        <div className="flex items-center gap-3 sm:gap-4">
-          {/* Hidden File Input */}
-          <input
-            type="file"
-            accept="image/*"
-            ref={fileInputRef}
-            onChange={handleFileSelect}
-            className="hidden"
+        <X size={22} />
+      </button>
+
+      {/* Desktop prev / next */}
+      {index > 0 && (
+        <button
+          type="button"
+          aria-label="Previous story"
+          onClick={prev}
+          className="absolute left-[max(1rem,calc(50%-19rem))] z-30 hidden size-11 place-items-center rounded-full bg-white/10 backdrop-blur transition hover:bg-white/20 sm:grid"
+        >
+          <ChevronLeft size={24} />
+        </button>
+      )}
+      {index < stories.length - 1 && (
+        <button
+          type="button"
+          aria-label="Next story"
+          onClick={next}
+          className="absolute right-[max(1rem,calc(50%-19rem))] z-30 hidden size-11 place-items-center rounded-full bg-white/10 backdrop-blur transition hover:bg-white/20 sm:grid"
+        >
+          <ChevronRight size={24} />
+        </button>
+      )}
+
+      {/* Story card: full-bleed on phones, 9:16 card on larger screens */}
+      <div className="relative h-full w-full overflow-hidden bg-neutral-950 sm:h-[min(92vh,880px)] sm:w-auto sm:aspect-[9/16] sm:rounded-3xl sm:shadow-2xl sm:ring-1 sm:ring-white/10">
+        {/* Blurred fill so landscape media doesn't leave flat bars */}
+        <img
+          src={backdrop}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 size-full scale-125 object-cover opacity-60 blur-2xl"
+        />
+
+        {/* Media */}
+        {isVideo ? (
+          <video
+            ref={videoRef}
+            key={story.id}
+            src={mediaFile(story.mediaId)}
+            poster={poster}
+            autoPlay
+            playsInline
+            muted={muted}
+            onTimeUpdate={(e) => {
+              const v = e.currentTarget;
+              if (v.duration) setProgress(v.currentTime / v.duration);
+            }}
+            onEnded={() => nextRef.current()}
+            className="absolute inset-0 size-full object-contain"
           />
+        ) : (
+          <img
+            key={story.id}
+            src={mediaFile(story.mediaId)}
+            alt={`Story by ${author}`}
+            draggable={false}
+            className="absolute inset-0 size-full object-contain"
+          />
+        )}
 
-          {/* FIXED: Add Story Button */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="group flex w-[76px] shrink-0 flex-col items-center gap-2"
+        {/* Tap / hold surface */}
+        <div
+          className="absolute inset-0 z-10 touch-none select-none"
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
+          onPointerLeave={() => setPaused(false)}
+          onPointerCancel={() => setPaused(false)}
+          onContextMenu={(e) => e.preventDefault()}
+        />
+
+        {/* Top scrim + progress + header */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 bg-gradient-to-b from-black/70 via-black/30 to-transparent px-3 pb-10 pt-3">
+          <div
+            className="flex gap-1"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={stories.length}
+            aria-valuenow={index + 1}
+            aria-label={`Story ${index + 1} of ${stories.length}`}
           >
-            <span className="relative">
-              <Avatar
-                name={user?.name}
-                size="lg"
-                className="size-[68px] text-2xl"
-              />
-              <span className="absolute -bottom-0.5 -right-0.5 grid size-6 place-items-center rounded-full border-2 border-surface bg-brand text-on-brand transition-transform group-hover:scale-110">
-                <Plus className="size-3.5" aria-hidden="true" />
-              </span>
-            </span>
-            <span className="w-full truncate text-center text-xs font-medium text-ink">
-              Add story
-            </span>
-          </button>
-
-          {/* SCROLLABLE AREA */}
-          <div className="relative flex-1 min-w-0">
-            {/* Left Scroll Button & Gradient */}
-            <div
-              className={cn(
-                "pointer-events-none absolute inset-y-0 left-0 z-10 flex w-16 items-center transition-opacity duration-200",
-                canScrollLeft ? "opacity-100" : "opacity-0",
-              )}
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-surface via-surface/80 to-transparent" />
-              <button
-                type="button"
-                onClick={() => scroll("left")}
-                aria-label="Scroll left"
-                className={cn(
-                  "pointer-events-auto relative ml-1 grid size-8 place-items-center rounded-full border border-line bg-surface text-ink-soft shadow-sm transition-colors hover:bg-raised hover:text-ink",
-                  !canScrollLeft && "hidden",
-                )}
+            {stories.map((s, i) => (
+              <span
+                key={s.id}
+                className="h-[3px] flex-1 overflow-hidden rounded-full bg-white/30"
               >
-                <ChevronLeft className="size-5" />
-              </button>
-            </div>
-
-            {/* Right Scroll Button & Gradient */}
-            <div
-              className={cn(
-                "pointer-events-none absolute inset-y-0 right-0 z-10 flex w-16 items-center justify-end transition-opacity duration-200",
-                canScrollRight ? "opacity-100" : "opacity-0",
-              )}
-            >
-              <div className="absolute inset-0 bg-gradient-to-l from-surface via-surface/80 to-transparent" />
-              <button
-                type="button"
-                onClick={() => scroll("right")}
-                aria-label="Scroll right"
-                className={cn(
-                  "pointer-events-auto relative mr-1 grid size-8 place-items-center rounded-full border border-line bg-surface text-ink-soft shadow-sm transition-colors hover:bg-raised hover:text-ink",
-                  !canScrollRight && "hidden",
-                )}
-              >
-                <ChevronRight className="size-5" />
-              </button>
-            </div>
-
-            {/* Scrollable UL */}
-            <ul
-              ref={scrollRef}
-              onScroll={checkScroll}
-              className="no-scrollbar flex snap-x gap-3 overflow-x-auto py-1 sm:gap-4"
-            >
-              {stories.map((story) => (
-                <li key={story.id} className="snap-start">
-                  <button
-                    type="button"
-                    onClick={() => markSeen(story.id)}
-                    aria-label={`${story.name}'s story${story.seen ? "" : ", new"}`}
-                    className="flex w-[76px] flex-col items-center gap-2"
-                  >
-                    <StoryRing seen={story.seen}>
-                      {story.image ? (
-                        <img
-                          src={story.image}
-                          alt={`${story.name}'s story`}
-                          className="size-full rounded-full object-cover"
-                        />
-                      ) : (
-                        <Avatar
-                          name={story.name}
-                          size="lg"
-                          className="size-full text-xl"
-                        />
-                      )}
-                    </StoryRing>
-                    <span
-                      className={cn(
-                        "w-full truncate text-center text-xs",
-                        story.seen ? "text-ink-soft" : "font-medium text-ink",
-                      )}
-                    >
-                      {story.name.split(" ")[0]}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      {/* INSTAGRAM-STYLE PREVIEW MODAL */}
-      {previewUrl &&
-        createPortal(
-          <div className="fixed inset-0 z-[100] flex flex-col bg-black/95 backdrop-blur-sm animate-in fade-in duration-200">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-4 sm:px-6">
-              <button
-                type="button"
-                onClick={handleCancelPreview}
-                disabled={isUploading}
-                className="grid size-10 place-items-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 disabled:opacity-50"
-              >
-                <X className="size-6" />
-              </button>
-              <h2 className="text-sm font-semibold text-white sm:text-base">
-                Story Preview
-              </h2>
-              <div className="size-10" /> {/* Spacer for centering */}
-            </div>
-
-            {/* Image Preview Area */}
-            <div className="flex-1 overflow-hidden p-4 sm:p-8">
-              <div className="flex size-full items-center justify-center">
-                <img
-                  src={previewUrl}
-                  alt="Story preview"
-                  className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+                <span
+                  className="block h-full origin-left rounded-full bg-white"
+                  style={{
+                    transform: `scaleX(${
+                      i < index ? 1 : i === index ? progress : 0
+                    })`,
+                  }}
                 />
+              </span>
+            ))}
+          </div>
+
+          <header className="pointer-events-auto mt-3 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Avatar
+                name={story.author?.name}
+                src={story.author?.image}
+                size="sm"
+                className="ring-2 ring-white/70"
+              />
+              <div className="min-w-0 leading-tight">
+                <p className="truncate text-sm font-semibold drop-shadow">
+                  {isOwner ? "Your story" : author}
+                </p>
+                <p className="text-xs text-white/75">
+                  {timeAgo(story.createdAt)}
+                </p>
               </div>
             </div>
 
-            {/* Footer / Share Button */}
-            <div className="flex items-center justify-center px-4 pb-8 pt-4 sm:px-6">
-              <Button
-                onClick={handleShareStory}
-                disabled={isUploading}
-                size="lg"
-                className="w-full max-w-xs rounded-full bg-brand text-base font-semibold text-white hover:bg-brand-hover"
+            <div className="flex items-center gap-1.5">
+              {paused && (
+                <span className="grid size-9 place-items-center rounded-full bg-black/30 backdrop-blur">
+                  <Pause size={16} />
+                </span>
+              )}
+              {isVideo && (
+                <button
+                  type="button"
+                  aria-label={muted ? "Unmute" : "Mute"}
+                  onClick={() => setMuted((m) => !m)}
+                  className="relative z-30 grid size-9 place-items-center rounded-full bg-black/30 backdrop-blur transition hover:bg-black/50"
+                >
+                  {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label="Close story"
+                onClick={onClose}
+                className="relative z-30 grid size-9 place-items-center rounded-full bg-black/30 backdrop-blur transition hover:bg-black/50 sm:hidden"
               >
-                {isUploading ? (
-                  <>
-                    <Loader2 className="mr-2 size-5 animate-spin" />
-                    Sharing...
-                  </>
-                ) : (
-                  "Share to story"
-                )}
-              </Button>
+                <X size={20} />
+              </button>
             </div>
-          </div>,
-          document.body,
-        )}
-    </>
+          </header>
+        </div>
+
+        {/* Bottom scrim + meta */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-14">
+          {error && (
+            <p
+              role="alert"
+              className="mb-3 rounded-xl bg-red-500/20 px-3 py-2 text-center text-sm text-red-200 backdrop-blur"
+            >
+              {error}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 backdrop-blur">
+                <Clock size={13} />
+                {timeLeft(story.expiresAt)}
+              </span>
+              {isOwner && vis && (
+                <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 backdrop-blur">
+                  <vis.Icon size={13} />
+                  {vis.label}
+                </span>
+              )}
+            </div>
+
+            {isOwner && (
+              <button
+                type="button"
+                title="Delete story"
+                aria-label="Delete story"
+                disabled={busy}
+                onClick={() => onDelete?.(story)}
+                className="pointer-events-auto relative z-30 grid size-10 place-items-center rounded-full bg-white/15 backdrop-blur transition hover:bg-red-500/60 disabled:opacity-50"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

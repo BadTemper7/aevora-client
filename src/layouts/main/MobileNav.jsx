@@ -4,9 +4,11 @@ import { Link, NavLink } from "react-router-dom";
 import { MOBILE_NAV } from "../../app/config/navigation";
 import { ROUTES } from "../../app/config/routes";
 import { cn } from "../../utils/cn";
+import { useMessageUnread } from "../../features/social/hooks/useUnreadIndicators";
 
 /** Bottom tab bar, shown below the `lg` breakpoint where the sidebar is hidden. */
 export default function MobileNav() {
+  const unread = useMessageUnread().data?.unread || 0;
   return (
     <nav
       aria-label="Primary"
@@ -37,7 +39,10 @@ export default function MobileNav() {
                   )
                 }
               >
-                <item.icon className="size-[22px]" aria-hidden="true" />
+                <span className="relative">
+                  <item.icon className="size-[22px]" aria-hidden="true" />
+                  {item.path === ROUTES.messages && unread > 0 && <span className="absolute -right-3 -top-2 rounded-full bg-brand px-1 text-[9px] font-bold text-on-brand" aria-label={`${unread} unread messages`}>{unread > 99 ? '99+' : unread}</span>}
+                </span>
                 {item.label}
               </NavLink>
             </li>

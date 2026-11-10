@@ -7,11 +7,10 @@ import Dropdown, {
   DropdownDivider,
   DropdownItem,
 } from "../../components/ui/Dropdown";
-import { useAuthStore } from "../../stores/authStore";
+import { useAuth } from "../../features/auth/hooks/useAuth";
 
 export default function UserMenu() {
-  const user = useAuthStore((state) => state.user);
-  const signOut = useAuthStore((state) => state.signOut);
+  const { user, signOut } = useAuth();
 
   return (
     <Dropdown

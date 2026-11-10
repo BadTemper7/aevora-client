@@ -5,16 +5,18 @@ export const ROUTES = {
   // auth
   login: "/login",
   register: "/register",
+  completeRegistration: "/complete-registration",
   forgotPassword: "/forgot-password",
 
   // main
   explore: "/explore",
   friends: "/friends",
   messages: "/messages",
-  notifications: "/notifications",
+  messageRequests: "/message-requests",
 
   // discover
   videos: "/videos",
+  subscriptions: "/subscriptions",
   watch: "/watch",
   gaming: "/gaming",
   communities: "/communities",
@@ -26,6 +28,8 @@ export const ROUTES = {
 
   // account
   profile: "/profile",
+  privacySafety: "/privacy-safety",
+  moderation: "/moderation",
   settings: "/settings",
 
   // legal / support
@@ -40,7 +44,6 @@ export const PAGE_TITLES = {
   [ROUTES.explore]: "Explore",
   [ROUTES.friends]: "Friends",
   [ROUTES.messages]: "Messages",
-  [ROUTES.notifications]: "Notifications",
   [ROUTES.videos]: "Short videos",
   [ROUTES.watch]: "Watch",
   [ROUTES.gaming]: "Gaming",

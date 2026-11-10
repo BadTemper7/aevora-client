@@ -1,4 +1,4 @@
-import { Bell, Plus, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { ROUTES } from "../../app/config/routes";
@@ -8,12 +8,10 @@ import ThemeToggle from "../../components/common/ThemeToggle";
 import { cn } from "../../utils/cn";
 import { SHELL } from "./shell";
 import UserMenu from "./UserMenu";
+import NotificationBell from "../../features/social/notifications/NotificationBell";
 
 const iconButton =
   "grid size-10 place-items-center rounded-xl text-ink-soft transition-colors hover:bg-raised hover:text-ink";
-
-// TODO: drive from the notifications API once it exists
-const hasUnreadNotifications = true;
 
 export default function Topbar() {
   return (
@@ -45,16 +43,7 @@ export default function Topbar() {
             Create
           </Link>
 
-          <Link
-            to={ROUTES.notifications}
-            aria-label="Notifications"
-            className={cn(iconButton, "relative")}
-          >
-            <Bell className="size-5" aria-hidden="true" />
-            {hasUnreadNotifications && (
-              <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-brand ring-2 ring-canvas" />
-            )}
-          </Link>
+          <NotificationBell />
 
           <ThemeToggle />
           <UserMenu />

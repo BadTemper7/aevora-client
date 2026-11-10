@@ -7,10 +7,11 @@ import {
   House,
   MessageCircle,
   Play,
-  Bell,
   SquareCheck,
   Users,
   UsersRound,
+  TvMinimalPlay,
+  Shield,
   UserRound,
 } from "lucide-react";
 
@@ -26,7 +27,7 @@ export const NAV_GROUPS = [
       { label: "Explore", icon: Compass, path: ROUTES.explore },
       { label: "Friends", icon: Users, path: ROUTES.friends },
       { label: "Messages", icon: MessageCircle, path: ROUTES.messages },
-      { label: "Notifications", icon: Bell, path: ROUTES.notifications },
+      { label: "Privacy & Safety", icon: Shield, path: ROUTES.privacySafety },
     ],
   },
   {
@@ -34,7 +35,7 @@ export const NAV_GROUPS = [
     title: "Discover",
     items: [
       { label: "Short videos", icon: Clapperboard, path: ROUTES.videos },
-      { label: "Watch", icon: Play, path: ROUTES.watch },
+      { label: "Subscriptions", icon: TvMinimalPlay, path: ROUTES.subscriptions },
       { label: "Gaming", icon: Gamepad2, path: ROUTES.gaming },
       { label: "Communities", icon: UsersRound, path: ROUTES.communities },
     ],
